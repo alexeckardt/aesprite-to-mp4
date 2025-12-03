@@ -1,6 +1,21 @@
 -- Aseprite FFMPEG Export Plugin
 -- Exports the current sprite to MP4 video using FFMPEG
 
+local error_messages = {
+  no_active_sprite = "No active sprite. Please open a sprite first.",
+  temp_dir_not_found = "ERROR: Could not find temp directory. Check your system TEMP/TMP environment variables.",
+  temp_dir_creation_failed = "ERROR: Failed to create temporary directory.",
+  sprite_frame_export_failed = "ERROR: Failed to export sprite frames.",
+  batch_file_creation_failed = "ERROR: Could not create batch file.",
+  output_file_not_specified = "Please specify an output file path.",
+  ffmpeg_not_installed = "ERROR: FFMPEG export failed. Make sure FFMPEG is installed and in your system PATH.",
+}
+
+local function show_error(error_msg)
+  print("[FFMPEG Export] ERROR: " .. error_msg)
+  app.alert(error_msg)
+end
+
 local function cleanup_temp_dir(dir)
   -- Windows cleanup command
   local cmd = "rmdir /s /q \"" .. dir .. "\""
@@ -79,9 +94,7 @@ local function export_to_mp4(sprite, settings, output_file)
   -- Get temp directory
   local temp_dir = os.getenv("TEMP") or os.getenv("TMP")
   if not temp_dir then
-    local error_msg = "ERROR: Could not find temp directory. Check your system TEMP/TMP environment variables."
-    print("[FFMPEG Export] " .. error_msg)
-    app.alert(error_msg)
+    show_error(error_messages.temp_dir_not_found)
     return
   end
   print("[FFMPEG Export] Temp directory: " .. temp_dir)
@@ -93,9 +106,7 @@ local function export_to_mp4(sprite, settings, output_file)
   
   local success = os.execute(mkdir_cmd)
   if success ~= 0 and success ~= true then
-    local error_msg = "ERROR: Failed to create temporary directory at: " .. frame_dir
-    print("[FFMPEG Export] " .. error_msg)
-    app.alert(error_msg)
+    show_error(error_messages.temp_dir_creation_failed)
     return
   end
   print("[FFMPEG Export] Frame directory created successfully")
@@ -129,9 +140,8 @@ local function export_to_mp4(sprite, settings, output_file)
   end)
   
   if not export_success then
-    local error_msg = "ERROR: Failed to export sprite frames.\nDetails: " .. tostring(export_error)
-    print("[FFMPEG Export] " .. error_msg)
-    app.alert(error_msg)
+    local error_msg = error_messages.sprite_frame_export_failed .. "\nDetails: " .. tostring(export_error)
+    show_error(error_msg)
     cleanup_temp_dir(frame_dir)
     return
   end
@@ -148,9 +158,7 @@ local function export_to_mp4(sprite, settings, output_file)
   local batch_file = frame_dir .. "\\run_ffmpeg.bat"
   local batch_handle = io.open(batch_file, "w")
   if not batch_handle then
-    local error_msg = "ERROR: Could not create batch file at: " .. batch_file
-    print("[FFMPEG Export] " .. error_msg)
-    app.alert(error_msg)
+    show_error(error_messages.batch_file_creation_failed)
     cleanup_temp_dir(frame_dir)
     return
   end
@@ -193,9 +201,8 @@ local function export_to_mp4(sprite, settings, output_file)
     print("[FFMPEG Export] SUCCESS: " .. success_msg)
     app.alert(success_msg)
   else
-    local error_msg = "ERROR: FFMPEG export failed with code " .. tostring(result) .. " (file exists: " .. tostring(file_exists) .. ").\n\nMake sure FFMPEG is installed and in your system PATH.\n\nFFMPEG Command:\n" .. ffmpeg_cmd
-    print("[FFMPEG Export] " .. error_msg)
-    app.alert(error_msg)
+    local error_msg = error_messages.ffmpeg_not_installed .. "\n\nFFMPEG Command:\n" .. ffmpeg_cmd
+    show_error(error_msg)
   end
 end
 
@@ -204,9 +211,7 @@ local function show_export_dialog()
   local sprite = app.activeSprite
   
   if not sprite then
-    local error_msg = "No active sprite. Please open a sprite first."
-    print("[FFMPEG Export] ERROR: " .. error_msg)
-    app.alert(error_msg)
+    show_error(error_messages.no_active_sprite)
     return
   end
   print("[FFMPEG Export] Active sprite: " .. sprite.filename)
@@ -269,14 +274,12 @@ local function show_export_dialog()
       
       print("[FFMPEG Export] Auto scale calculated: sprite " .. sprite.width .. "x" .. sprite.height .. " -> scale factor: " .. string.format("%.2f", scale_factor))
     end
-  until false
+  until dialog.data.ok or dialog.data.cancel
 
   if dialog.data.ok then
     local output_file = dialog.data.output
     if output_file == "" then
-      local error_msg = "Please specify an output file path."
-      print("[FFMPEG Export] ERROR: " .. error_msg)
-      app.alert(error_msg)
+      show_error(error_messages.output_file_not_specified)
       return
     end
     print("[FFMPEG Export] Starting export to: " .. output_file)
