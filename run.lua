@@ -149,7 +149,6 @@ local function export_to_mp4(sprite, settings, output_file)
   batch_handle:write("@echo off\n")
   batch_handle:write("chcp 65001 >nul\n")  -- Set UTF-8 encoding
   batch_handle:write(batch_cmd .. "\n")
-  batch_handle:write("pause\n")
   batch_handle:close()
   
   print("[FFMPEG Export] Batch file created: " .. batch_file)
@@ -213,6 +212,7 @@ local function show_export_dialog()
   dialog:combobox { id = "pixelFormat", label = "Pixel Format:", options = { "yuv420p", "yuv422p", "yuv444p" }, option = "yuv420p" }
   dialog:check { id = "loop", label = "Loop Animation", selected = true }
   dialog:number { id = "scale", label = "Scale (1=original):", text = "1" }
+  dialog:button { id = "autoScale", text = "Auto Scale to 1920:1080" }
   
   dialog:separator { text = "Audio" }
   dialog:check { id = "audioEnabled", label = "Include Audio", selected = false }
@@ -222,7 +222,32 @@ local function show_export_dialog()
   dialog:button { id = "ok", text = "Export" }
   dialog:button { id = "cancel", text = "Cancel" }
 
-  dialog:show()
+  -- Modal dialog loop
+  repeat
+    dialog:show()
+    
+    if dialog.data.autoScale then
+      -- Calculate auto scale based on sprite dimensions
+      local sprite_width = sprite.width
+      local sprite_height = sprite.height
+      local target_width = 1920
+      local target_height = 1080
+      
+      -- Calculate scale factors for each dimension
+      local scale_width = target_width / sprite_width
+      local scale_height = target_height / sprite_height
+      
+      -- Use the smaller scale to ensure we don't exceed the target in either dimension
+      local scale_factor = math.min(scale_width, scale_height)
+      
+      -- Update the scale field
+      dialog:modify { id = "scale", text = string.format("%.2f", scale_factor) }
+      
+      print("[FFMPEG Export] Auto scale calculated: sprite " .. sprite_width .. "x" .. sprite_height .. " -> scale factor: " .. string.format("%.2f", scale_factor))
+    elseif dialog.data.ok or dialog.data.cancel then
+      break
+    end
+  until false
 
   if dialog.data.ok then
     local output_file = dialog.data.output
