@@ -7,6 +7,14 @@ local function cleanup_temp_dir(dir)
   os.execute(cmd)
 end
 
+local function calculate_auto_scale(sprite_width, sprite_height)
+  local target_width = 1920
+  local target_height = 1080
+  local scale_width = target_width / sprite_width
+  local scale_height = target_height / sprite_height
+  return math.min(scale_width, scale_height)
+end
+
 local function build_ffmpeg_command(frame_dir, output_path, fps, preset, crf, pixel_format, scale, audio_enabled, audio_path)
   local cmd = "ffmpeg -y "
   
@@ -16,9 +24,9 @@ local function build_ffmpeg_command(frame_dir, output_path, fps, preset, crf, pi
   -- Build filter chain
   local filters = {}
   
-  -- Scale filter if needed
+  -- Scale filter if needed - use nearest neighbor for pixel art
   if scale ~= 1 then
-    table.insert(filters, "scale=trunc(iw*" .. scale .. "/2)*2:trunc(ih*" .. scale .. "/2)*2")
+    table.insert(filters, "scale=trunc(iw*" .. scale .. "/2)*2:trunc(ih*" .. scale .. "/2)*2:flags=neighbor")
   end
   
   -- Pixel format
@@ -42,6 +50,9 @@ local function build_ffmpeg_command(frame_dir, output_path, fps, preset, crf, pi
     cmd = cmd .. "-an "
   end
   
+  -- MP4 output flags for compatibility
+  cmd = cmd .. "-movflags +faststart "
+  
   -- Output file - ensure proper quoting
   cmd = cmd .. "\"" .. output_path .. "\""
   
@@ -57,6 +68,7 @@ local function export_to_mp4(sprite, settings, output_file)
   local scale = tonumber(settings.scale) or 1
   local audio_enabled = settings.audioEnabled
   local audio_path = settings.audioPath
+  local loop_count = tonumber(settings.loopCount) or 1
   
   print("[FFMPEG Export] Starting export with settings:")
   print("[FFMPEG Export]   FPS: " .. fps)
@@ -91,20 +103,28 @@ local function export_to_mp4(sprite, settings, output_file)
   -- Export sprite frames as PNG sequence
   local frame_pattern = frame_dir .. "\\frame_%04d.png"
   print("[FFMPEG Export] Exporting sprite frames to: " .. frame_pattern)
+  print("[FFMPEG Export] Total frames in sprite: " .. #sprite.frames)
   
   local export_success, export_error = pcall(function()
-    -- Export each frame individually using image:saveAs
-    for i = 1, #sprite.frames do
-      local frame = sprite.frames[i]
-      local frame_file = string.format(frame_dir .. "\\frame_%04d.png", i - 1)
-      print("[FFMPEG Export] Exporting frame " .. (i - 1) .. " to: " .. frame_file)
-      
-      -- Get the image for this frame and save it
-      local image = Image(sprite, frame)
-      image:saveAs{
-        filename = frame_file,
-        palette = sprite.palettes[1]
-      }
+    -- Export each frame individually, repeated for loop count
+    local frame_number = 0
+    for loop = 1, loop_count do
+      for frame_idx = 1, #sprite.frames do
+        local frame_file = string.format(frame_dir .. "\\frame_%04d.png", frame_number)
+        print("[FFMPEG Export] Exporting frame " .. frame_number .. " (loop " .. loop .. ") to: " .. frame_file)
+        
+        -- Create an image and draw the specific frame
+        local image = Image(sprite.width, sprite.height, sprite.colorMode)
+        image:drawSprite(sprite, frame_idx)
+        
+        -- Save the image
+        image:saveAs{
+          filename = frame_file,
+          palette = sprite.palettes[1]
+        }
+        
+        frame_number = frame_number + 1
+      end
     end
   end)
   
@@ -149,7 +169,9 @@ local function export_to_mp4(sprite, settings, output_file)
   batch_handle:write("@echo off\n")
   batch_handle:write("chcp 65001 >nul\n")  -- Set UTF-8 encoding
   batch_handle:write(batch_cmd .. "\n")
-  batch_handle:write("pause\n")
+  batch_handle:write("echo.\n")
+  batch_handle:write("echo FFMPEG completed. Check output above for any errors.\n")
+  -- batch_handle:write("pause\n")
   batch_handle:close()
   
   print("[FFMPEG Export] Batch file created: " .. batch_file)
@@ -207,12 +229,15 @@ local function show_export_dialog()
   dialog:separator { text = "Video Options" }
   dialog:number { id = "fps", label = "FPS:", text = "24" }
   dialog:combobox { id = "preset", label = "Encoding Preset:", options = { "ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow" }, option = "medium" }
-  dialog:combobox { id = "crf", label = "Quality (CRF 18-28):", options = { "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28" }, option = "23" }
+  dialog:label { text = "Quality (CRF 0=lossless, increase to reduce mp4 size)" }
+  dialog:combobox { id = "crf", label = "CRF:", options = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12", "15", "18", "20", "23", "28" }, option = "0" }
   
   dialog:separator { text = "Advanced" }
   dialog:combobox { id = "pixelFormat", label = "Pixel Format:", options = { "yuv420p", "yuv422p", "yuv444p" }, option = "yuv420p" }
-  dialog:check { id = "loop", label = "Loop Animation", selected = true }
+  dialog:slider { id = "loopCount", label = "Loop Count:", min = 1, max = 100, value = 5 }
+  --dialog:label { id = "durationDisplay", text = "Video duration: 0.00s" }
   dialog:number { id = "scale", label = "Scale (1=original):", text = "1" }
+  dialog:button { id = "autoScale", text = "Auto Scale to 1920:1080" }
   
   dialog:separator { text = "Audio" }
   dialog:check { id = "audioEnabled", label = "Include Audio", selected = false }
@@ -222,7 +247,29 @@ local function show_export_dialog()
   dialog:button { id = "ok", text = "Export" }
   dialog:button { id = "cancel", text = "Cancel" }
 
-  dialog:show()
+  -- Apply auto-scale by default
+  local scale_factor = calculate_auto_scale(sprite.width, sprite.height)
+  dialog:modify { id = "scale", text = string.format("%.2f", scale_factor) }
+  print("[FFMPEG Export] Default auto scale applied: sprite " .. sprite.width .. "x" .. sprite.height .. " -> scale factor: " .. string.format("%.2f", scale_factor))
+
+  -- Modal dialog loop
+  repeat
+    dialog:show()
+    
+    if dialog.data.ok or dialog.data.cancel then
+      break
+    end
+    
+    if dialog.data.autoScale then
+      -- Calculate auto scale based on sprite dimensions
+      local scale_factor = calculate_auto_scale(sprite.width, sprite.height)
+      
+      -- Update the scale field
+      dialog:modify { id = "scale", text = string.format("%.2f", scale_factor) }
+      
+      print("[FFMPEG Export] Auto scale calculated: sprite " .. sprite.width .. "x" .. sprite.height .. " -> scale factor: " .. string.format("%.2f", scale_factor))
+    end
+  until false
 
   if dialog.data.ok then
     local output_file = dialog.data.output
