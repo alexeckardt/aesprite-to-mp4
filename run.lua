@@ -16,13 +16,13 @@ local function build_ffmpeg_command(frame_dir, output_path, fps, preset, crf, pi
   -- Build filter chain
   local filters = {}
   
-  -- Scale filter if needed
+  -- Scale filter if needed - use nearest neighbor for pixel art
   if scale ~= 1 then
-    table.insert(filters, "scale=trunc(iw*" .. scale .. "/2)*2:trunc(ih*" .. scale .. "/2)*2")
+    table.insert(filters, "scale=trunc(iw*" .. scale .. "/2)*2:trunc(ih*" .. scale .. "/2)*2:flags=neighbor")
   end
   
   -- Pixel format
-  table.insert(filters, "format=" .. pixel_format)
+  table.insert(filters, "format=yuv420p")
   
   if #filters > 0 then
     cmd = cmd .. "-vf \"" .. table.concat(filters, ",") .. "\" "
@@ -41,6 +41,9 @@ local function build_ffmpeg_command(frame_dir, output_path, fps, preset, crf, pi
   else
     cmd = cmd .. "-an "
   end
+  
+  -- MP4 output flags for compatibility
+  cmd = cmd .. "-movflags +faststart "
   
   -- Output file - ensure proper quoting
   cmd = cmd .. "\"" .. output_path .. "\""
@@ -91,16 +94,20 @@ local function export_to_mp4(sprite, settings, output_file)
   -- Export sprite frames as PNG sequence
   local frame_pattern = frame_dir .. "\\frame_%04d.png"
   print("[FFMPEG Export] Exporting sprite frames to: " .. frame_pattern)
+  print("[FFMPEG Export] Total frames in sprite: " .. #sprite.frames)
   
   local export_success, export_error = pcall(function()
-    -- Export each frame individually using image:saveAs
-    for i = 1, #sprite.frames do
-      local frame = sprite.frames[i]
-      local frame_file = string.format(frame_dir .. "\\frame_%04d.png", i - 1)
-      print("[FFMPEG Export] Exporting frame " .. (i - 1) .. " to: " .. frame_file)
+    -- Export each frame individually
+    for frame_idx = 1, #sprite.frames do
+      local frame_number = frame_idx - 1
+      local frame_file = string.format(frame_dir .. "\\frame_%04d.png", frame_number)
+      print("[FFMPEG Export] Exporting frame " .. frame_number .. " to: " .. frame_file)
       
-      -- Get the image for this frame and save it
-      local image = Image(sprite, frame)
+      -- Create an image and draw the specific frame
+      local image = Image(sprite.width, sprite.height, sprite.colorMode)
+      image:drawSprite(sprite, frame_idx)
+      
+      -- Save the image
       image:saveAs{
         filename = frame_file,
         palette = sprite.palettes[1]
@@ -149,6 +156,9 @@ local function export_to_mp4(sprite, settings, output_file)
   batch_handle:write("@echo off\n")
   batch_handle:write("chcp 65001 >nul\n")  -- Set UTF-8 encoding
   batch_handle:write(batch_cmd .. "\n")
+  batch_handle:write("echo.\n")
+  batch_handle:write("echo FFMPEG completed. Check output above for any errors.\n")
+  batch_handle:write("pause\n")
   batch_handle:close()
   
   print("[FFMPEG Export] Batch file created: " .. batch_file)
@@ -206,7 +216,8 @@ local function show_export_dialog()
   dialog:separator { text = "Video Options" }
   dialog:number { id = "fps", label = "FPS:", text = "24" }
   dialog:combobox { id = "preset", label = "Encoding Preset:", options = { "ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow" }, option = "medium" }
-  dialog:combobox { id = "crf", label = "Quality (CRF 18-28):", options = { "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28" }, option = "23" }
+  dialog:label { text = "Quality (CRF 0=lossless, increase to reduce mp4 size)" }
+  dialog:combobox { id = "crf", label = "CRF:", options = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12", "15", "18", "20", "23", "28" }, option = "0" }
   
   dialog:separator { text = "Advanced" }
   dialog:combobox { id = "pixelFormat", label = "Pixel Format:", options = { "yuv420p", "yuv422p", "yuv444p" }, option = "yuv420p" }
