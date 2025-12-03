@@ -7,6 +7,14 @@ local function cleanup_temp_dir(dir)
   os.execute(cmd)
 end
 
+local function calculate_auto_scale(sprite_width, sprite_height)
+  local target_width = 1920
+  local target_height = 1080
+  local scale_width = target_width / sprite_width
+  local scale_height = target_height / sprite_height
+  return math.min(scale_width, scale_height)
+end
+
 local function build_ffmpeg_command(frame_dir, output_path, fps, preset, crf, pixel_format, scale, audio_enabled, audio_path)
   local cmd = "ffmpeg -y "
   
@@ -22,7 +30,7 @@ local function build_ffmpeg_command(frame_dir, output_path, fps, preset, crf, pi
   end
   
   -- Pixel format
-  table.insert(filters, "format=yuv420p")
+  table.insert(filters, "format=" .. pixel_format)
   
   if #filters > 0 then
     cmd = cmd .. "-vf \"" .. table.concat(filters, ",") .. "\" "
@@ -240,15 +248,9 @@ local function show_export_dialog()
   dialog:button { id = "cancel", text = "Cancel" }
 
   -- Apply auto-scale by default
-  local sprite_width = sprite.width
-  local sprite_height = sprite.height
-  local target_width = 1920
-  local target_height = 1080
-  local scale_width = target_width / sprite_width
-  local scale_height = target_height / sprite_height
-  local scale_factor = math.min(scale_width, scale_height)
+  local scale_factor = calculate_auto_scale(sprite.width, sprite.height)
   dialog:modify { id = "scale", text = string.format("%.2f", scale_factor) }
-  print("[FFMPEG Export] Default auto scale applied: sprite " .. sprite_width .. "x" .. sprite_height .. " -> scale factor: " .. string.format("%.2f", scale_factor))
+  print("[FFMPEG Export] Default auto scale applied: sprite " .. sprite.width .. "x" .. sprite.height .. " -> scale factor: " .. string.format("%.2f", scale_factor))
 
   -- Modal dialog loop
   repeat
@@ -260,22 +262,12 @@ local function show_export_dialog()
     
     if dialog.data.autoScale then
       -- Calculate auto scale based on sprite dimensions
-      local sprite_width = sprite.width
-      local sprite_height = sprite.height
-      local target_width = 1920
-      local target_height = 1080
-      
-      -- Calculate scale factors for each dimension
-      local scale_width = target_width / sprite_width
-      local scale_height = target_height / sprite_height
-      
-      -- Use the smaller scale to ensure we don't exceed the target in either dimension
-      local scale_factor = math.min(scale_width, scale_height)
+      local scale_factor = calculate_auto_scale(sprite.width, sprite.height)
       
       -- Update the scale field
       dialog:modify { id = "scale", text = string.format("%.2f", scale_factor) }
       
-      print("[FFMPEG Export] Auto scale calculated: sprite " .. sprite_width .. "x" .. sprite_height .. " -> scale factor: " .. string.format("%.2f", scale_factor))
+      print("[FFMPEG Export] Auto scale calculated: sprite " .. sprite.width .. "x" .. sprite.height .. " -> scale factor: " .. string.format("%.2f", scale_factor))
     end
   until false
 
